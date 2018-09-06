@@ -112,6 +112,8 @@ type
     procedure ExecStringFunction;
     procedure InverseByteOrderHex;
     procedure ConvertNumberToBase;
+    procedure ReturnDIV;
+    procedure ReturnMOD;
   public
     { Public declarations }
   end;
@@ -903,7 +905,7 @@ end;
 
 function TfrmTextEditor.GetHandlers: TNamedHandlers;
 begin
-  SetLength(Result, 23);
+  SetLength(Result, 25);
 
   Result[0].Name := 'Clear <br/> between XML cells';
   Result[0].Handler := ClearLineBreaksBetweenXMLCells;
@@ -973,6 +975,12 @@ begin
 
   Result[22].Name := 'Convert Number To Base';
   Result[22].Handler := ConvertNumberToBase;
+
+  Result[23].Name := 'Return DIV';
+  Result[23].Handler := ReturnDIV;
+
+  Result[24].Name := 'Return MOD';
+  Result[24].Handler := ReturnMOD;
 end;
 
 
@@ -1197,6 +1205,28 @@ begin
   spaces := StringOfChar(' ', spCount);
   memResult.Lines.Text :=
     StringReplace(memEdit.Lines.Text, #9, spaces, [rfReplaceAll]);
+end;
+
+
+procedure TfrmTextEditor.ReturnDIV;
+var
+  num: integer;
+  divider: integer;
+begin
+  num := StrToIntDef(Trim(memEdit.Lines.Text), 0);
+  divider := StrToIntDef(edArg1.Text, 1);
+  memResult.Lines.Text := IntToStr(num div divider);
+end;
+
+
+procedure TfrmTextEditor.ReturnMOD;
+var
+  num: integer;
+  divider: integer;
+begin
+  num := StrToIntDef(Trim(memEdit.Lines.Text), 0);
+  divider := StrToIntDef(edArg1.Text, 1);
+  memResult.Lines.Text := IntToStr(num mod divider);
 end;
 
 
