@@ -51,16 +51,19 @@ type
     FSign: boolean;
     FIntPart: TByteDynArray;
     FFracPart: TByteDynArray;
+    FPeriod: boolean;
 
     function GetAsInteger: int64;
     procedure SetAsInteger(AValue: int64);
     function GetAsString: string;
     procedure SetAsString(const AValue: string);
 
-    procedure Allac(var AArray: TByteDynArray; const ALength: integer);
     function SignInt: integer;
+
+    procedure TrimParts;
   public
-    constructor Create(ABase: integer; const AValue: string);
+    constructor Create(ABase: integer; AValue: integer); overload;
+    constructor Create(ABase: integer; const AValue: string); overload;
 
     procedure Clear;
 
@@ -69,6 +72,7 @@ type
     function SafeInt(AIndex: integer): byte;
     function SafeFrac(AIndex: integer): byte;
 
+    procedure Negative; overload;
     function LessThan(const AValue: TSNumber): boolean;
     procedure Add(const AValue: TSNumber); overload;
     procedure Add(AValue: integer); overload;
@@ -76,9 +80,14 @@ type
 
     procedure Subtract(const AValue: TSNumber);
 
-    procedure Divide(const AValue: TSNumber);
+    procedure Multiply(const AValue: integer);
+
+    procedure Divide(const AValue: TSNumber); overload;
+    procedure Divide(AValue: integer); overload;
 
     procedure ConvertTo(ABase: integer);
+
+    class operator Negative(const AValue: TSNumber): TSNumber; overload;
 
     property AsInteger: int64 read GetAsInteger write SetAsInteger;
     property AsString: string read GetAsString write SetAsString;
@@ -99,7 +108,6 @@ var
   i: integer;
   overFlow: integer;
   sum: integer;
-  lastNonZero: integer;
   selfLess: boolean;
 begin
   maxLen := Max(Length(FIntPart), Length(AValue.FIntPart));
@@ -113,7 +121,6 @@ begin
     selfLess := LessThan(AValue);
 
   overFlow := 0;
-  lastNonZero := -1;
   for i := High(AValue.FFracPart) downto 0 do begin
     if FSign <> AValue.FSign then begin
       if selfLess then
@@ -136,10 +143,7 @@ begin
       FFracPart[i] := sum;
       overFlow := 0;
     end;
-    if (lastNonZero = -1) and (FFracPart[i] <> 0) then
-      lastNonZero := i;
   end;
-  SetLength(FFracPart, lastNonZero + 1);
 
   for i := 0 to High(FIntPart) do begin
     if FSign <> AValue.FSign then begin
@@ -165,13 +169,7 @@ begin
     end;
   end;
 
-  for i := High(FIntPart) downto 0 do
-    if FIntPart[i] = 0 then begin
-      lastNonZero := i;
-      Break;
-    end;
-
-  SetLength(FIntPart, lastNonZero + 1);
+  TrimParts;
 end;
 
 
@@ -191,14 +189,6 @@ begin
 end;
 
 
-procedure TSNumber.Allac(var AArray: TByteDynArray; const ALength: integer);
-begin
-  // Does not work
-  SetLength(AArray, ALength);
-  FillChar(AArray, ALength * SizeOf(byte), 0);
-end;
-
-
 procedure TSNumber.Assign(const ASource: TSNumber);
 var
   i: integer;
@@ -211,6 +201,7 @@ begin
     FIntPart[i] := ASource.FIntPart[i];
   for i := 0 to High(FFracPart) do
     FFracPart[i] := ASource.FFracPart[i];
+  FPeriod := ASource.FPeriod;
 end;
 
 
@@ -227,14 +218,8 @@ var
   src: TSNumber;
   i: integer;
   exp: int64;
-  lt: TRational;
-  rt: TRational;
-  range: TRational;
-  srcDigit: byte;
-
-  fracPart: TRational;
-  digitPart: TRational;
-  fracAsInt: integer;
+  fracExp: TSNumber;
+  digitPart: TSNumber;
 begin
   src.Assign(Self);
 
@@ -246,45 +231,22 @@ begin
     exp := exp * src.FBase;
   end;
 
-//  i := 0;
-//  while i < Length(src.FFracPart) do begin
-//    range := FBase;
-//    lt := 0;
-//    rt := FBase;
-//    while lt.IntPart < rt.IntPart do begin
-//      //outRange := rt - lt + 1;
-//      range := range / src.FBase;
-//      if i < Length(src.FFracPart) then
-//        srcDigit := src.FFracPart[i]
-//      else
-//        srcDigit := 0;
-//      lt := lt + range * srcDigit;
-//      rt := lt + range;// - 1 + Sign(outRange mod src.FBase);
-//      Inc(i);
-//    end;
-//
-//    SetLength(FFracPart, Length(FFracPart) + 1);
-//    FFracPart[High(FFracPart)] := lt.IntPart;
-//
-//    Inc(i);
-//  end;
-
-  SetLength(FFracPart, Length(src.FFracPart));
-  fracPart := 0;
-  digitPart := 1;
+  fracExp := TSNumber.Create(FBase, 1);
   for i := 0 to Length(src.FFracPart) - 1 do begin
-    srcDigit := src.FFracPart[i];
-    digitPart.Divide(src.FBase);
-    digitPart.Multiply(FBase);
-    fracPart.Multiply(FBase);
-    fracPart.Add(digitPart * srcDigit);
-  end;
+    fracExp.Divide(src.FBase);
 
-  fracAsInt := fracPart.IntPart;
-  for i := High(FFracPart) downto 0 do begin
-    FFracPart[i] := fracAsInt mod FBase;
-    fracAsInt := fracAsInt div FBase;
+    digitPart.Assign(fracExp);
+    digitPart.Multiply(src.FFracPart[i]);
+
+    Add(digitPart);
   end;
+end;
+
+
+constructor TSNumber.Create(ABase, AValue: integer);
+begin
+  FBase := ABase;
+  AsInteger := AValue;
 end;
 
 
@@ -292,6 +254,59 @@ constructor TSNumber.Create(ABase: integer; const AValue: string);
 begin
   FBase := ABase;
   AsString := AValue;
+end;
+
+
+procedure TSNumber.Divide(AValue: integer);
+var
+  rems: TByteDynArray;
+
+  function wasRemain(ARemain: byte): boolean;
+  var
+    i: integer;
+  begin
+    Result := false;
+    for i := 0 to High(rems) do
+      if rems[i] = ARemain then begin
+        Result := true;
+        Break;
+      end;
+  end;
+
+var
+  i: integer;
+  res: TSNumber;
+  rem: integer;
+begin
+  res.Assign(Self);
+
+  SetLength(res.FIntPart, Length(FIntPart));
+  rem := 0;
+  for i := High(FIntPart) downto 0 do begin
+    rem := rem * FBase;
+    res.FIntPart[i] := (FIntPart[i] + rem) div AValue;
+    rem := (FIntPart[i] + rem) mod AValue;
+  end;
+
+  rems := nil;
+  i := 0;
+  while (i < Length(FFracPart)) or (rem > 0) and not wasRemain(rem) do begin
+    if i >= Length(FFracPart) then begin
+      SetLength(rems, Length(rems) + 1);
+      rems[High(rems)] := rem;
+    end;
+
+    rem := rem * FBase;
+    SetLength(res.FFracPart, i + 1);
+    res.FFracPart[i] := (SafeFrac(i) + rem) div AValue;
+    rem := (SafeFrac(i) + rem) mod AValue;
+
+    Inc(i);
+  end;
+  res.FPeriod := rem > 0;
+
+  Assign(res);
+  TrimParts;
 end;
 
 
@@ -377,6 +392,35 @@ begin
 end;
 
 
+procedure TSNumber.Multiply(const AValue: integer);
+var
+  value: TSNumber;
+  i: integer;
+begin
+  value.Assign(Self);
+
+  Clear;
+  for i := 1 to Abs(AValue) do
+    Add(value);
+
+  FSign := value.FSign <> (AValue < 0);
+  TrimParts;
+end;
+
+
+procedure TSNumber.Negative;
+begin
+  FSign := not FSign;
+end;
+
+
+class operator TSNumber.Negative(const AValue: TSNumber): TSNumber;
+begin
+  Result.Assign(AValue);
+  Result.Negative;
+end;
+
+
 function TSNumber.SafeFrac(AIndex: integer): byte;
 begin
   Result := 0;
@@ -440,7 +484,30 @@ end;
 
 procedure TSNumber.Subtract(const AValue: TSNumber);
 begin
+  Add(-AValue);
+end;
 
+
+procedure TSNumber.TrimParts;
+var
+  nonZeroPos: integer;
+  i: integer;
+begin
+  nonZeroPos := -1;
+  for i := High(FIntPart) downto 0 do
+    if FIntPart[i] > 0 then begin
+      nonZeroPos := i;
+      Break;
+    end;
+  SetLength(FIntPart, nonZeroPos + 1);
+
+  nonZeroPos := -1;
+  for i := High(FFracPart) downto 0 do
+    if FFracPart[i] > 0 then begin
+      nonZeroPos := i;
+      Break;
+    end;
+  SetLength(FFracPart, nonZeroPos + 1);
 end;
 
 
