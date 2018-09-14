@@ -51,7 +51,7 @@ type
     FSign: boolean;
     FIntPart: TByteDynArray;
     FFracPart: TByteDynArray;
-    FPeriod: boolean;
+    FPeriodPos: integer;
 
     function GetAsInteger: int64;
     procedure SetAsInteger(AValue: int64);
@@ -61,6 +61,7 @@ type
     function SignInt: integer;
 
     procedure TrimParts;
+    procedure CheckBaseConstraint;
   public
     constructor Create(ABase: integer; AValue: integer); overload;
     constructor Create(ABase: integer; const AValue: string); overload;
@@ -201,7 +202,20 @@ begin
     FIntPart[i] := ASource.FIntPart[i];
   for i := 0 to High(FFracPart) do
     FFracPart[i] := ASource.FFracPart[i];
-  FPeriod := ASource.FPeriod;
+  FPeriodPos := ASource.FPeriodPos;
+end;
+
+
+procedure TSNumber.CheckBaseConstraint;
+var
+  digit: byte;
+begin
+  for digit in FIntPart do
+    if digit >= FBase then
+      raise Exception.CreateFmt('Digit %d >= Base %d', [digit, FBase]);
+  for digit in FFracPart do
+    if digit >= FBase then
+      raise Exception.CreateFmt('Digit %d >= Base %d', [digit, FBase]);
 end;
 
 
@@ -210,6 +224,7 @@ begin
   FSign := false;
   SetLength(FIntPart, 0);
   SetLength(FFracPart, 0);
+  FPeriodPos := -1;
 end;
 
 
@@ -261,14 +276,14 @@ procedure TSNumber.Divide(AValue: integer);
 var
   rems: TByteDynArray;
 
-  function wasRemain(ARemain: byte): boolean;
+  function remainPos(ARemain: byte): integer;
   var
     i: integer;
   begin
-    Result := false;
+    Result := -1;
     for i := 0 to High(rems) do
       if rems[i] = ARemain then begin
-        Result := true;
+        Result := i;
         Break;
       end;
   end;
@@ -290,7 +305,8 @@ begin
 
   rems := nil;
   i := 0;
-  while (i < Length(FFracPart)) or (rem > 0) and not wasRemain(rem) do begin
+  res.FPeriodPos := -1;
+  while (i < Length(FFracPart)) or (rem > 0) and (res.FPeriodPos < 0) do begin
     if i >= Length(FFracPart) then begin
       SetLength(rems, Length(rems) + 1);
       rems[High(rems)] := rem;
@@ -301,9 +317,10 @@ begin
     res.FFracPart[i] := (SafeFrac(i) + rem) div AValue;
     rem := (SafeFrac(i) + rem) mod AValue;
 
+    res.FPeriodPos := remainPos(rem);
+
     Inc(i);
   end;
-  res.FPeriod := rem > 0;
 
   Assign(res);
   TrimParts;
@@ -343,8 +360,13 @@ begin
       Result := '0';
     Result := Result + '.';
 
-    for i := Low(FFracPart) to High(FFracPart) do
+    for i := Low(FFracPart) to High(FFracPart) do begin
+      if i = FPeriodPos then
+        Result := Result + '(';
       Result := Result + IntToStr(FFracPart[i]);
+    end;
+    if FPeriodPos > 0 then
+      Result := Result + ')';
   end;
 
   if Result = '' then
@@ -451,25 +473,43 @@ end;
 
 procedure TSNumber.SetAsString(const AValue: string);
 var
-  ps: integer;
+  pti: integer;
   i: integer;
+  lbkt: integer;
+  rbkt: integer;
 begin
   //TODO: number validation, only digits in AValue
   //TODO: check base validness
-  ps := Pos('.', AValue);
-  if ps > 0 then begin
-    SetLength(FIntPart, ps - 1);
-    SetLength(FFracPart, Length(AValue) - ps);
-    for i := 1 to ps - 1 do
-      FIntPart[ps - i - 1] := StrToInt(AValue[i]);
-    for i := ps + 1 to Length(AValue) do
-      FFracPart[i - ps - 1] := StrToInt(AValue[i]);
+  Clear;
+
+  pti := Pos('.', AValue);
+  if pti > 0 then begin
+    SetLength(FIntPart, pti - 1);
+    SetLength(FFracPart, Length(AValue) - pti);
+    for i := 1 to pti - 1 do
+      FIntPart[pti - i - 1] := StrToInt(AValue[i]);
+    for i := pti + 1 to Length(AValue) do
+      FFracPart[i - pti - 1] := StrToInt(AValue[i]);
   end
   else begin
     SetLength(FIntPart, Length(AValue));
     for i := 1 to Length(AValue) do
       FIntPart[Length(AValue) - i] := StrToInt(AValue[i]);
   end;
+
+  lbkt := Pos('(', AValue);
+  rbkt := Pos(')', AValue);
+
+  if
+    (lbkt > 0) and (rbkt <= 0) or (lbkt <= 0) and (rbkt > 0) or
+    (rbkt - lbkt < 2) or (pti > lbkt)
+  then
+    raise Exception.Create('Wrong number format: ''('', '')''');
+
+  if lbkt > 0 then
+    FPeriodPos := lbkt - pti - 1;
+
+  CheckBaseConstraint;
 end;
 
 
