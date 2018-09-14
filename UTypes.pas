@@ -6,6 +6,15 @@ uses
   Types;
 
 type
+  TBigInt = record
+  private
+    FSign: boolean;
+    FData: TCardinalDynArray;
+  public
+    class operator Implicit(const AValue: integer): TBigInt; overload;
+  end;
+
+
   TRational = record
   private
     FIntPart: integer;
@@ -21,6 +30,7 @@ type
     procedure Negative; overload;
     function LessThan(const AValue: TRational): boolean; overload;
     procedure Add(const AValue: TRational); overload;
+    procedure Add(AValue: integer); overload;
     procedure Subtract(const AValue: TRational); overload;
     procedure Multiply(AMultiplier: integer); overload;
     procedure Divide(ADivider: integer); overload;
@@ -57,6 +67,8 @@ type
     procedure SetAsInteger(AValue: int64);
     function GetAsString: string;
     procedure SetAsString(const AValue: string);
+    function GetAsRational: TRational;
+    procedure SetAsRational(const AValue: TRational);
 
     function SignInt: integer;
 
@@ -92,7 +104,7 @@ type
 
     property AsInteger: int64 read GetAsInteger write SetAsInteger;
     property AsString: string read GetAsString write SetAsString;
-
+    property AsRational: TRational read GetAsRational write SetAsRational;
   end;
 
 
@@ -347,6 +359,49 @@ begin
 end;
 
 
+function TSNumber.GetAsRational: TRational;
+var
+  intPart: TRational;
+  uniqueFrac: TRational;
+  periodFrac: TRational;
+  digitPart: TRational;
+  periodSum: TRational;
+  exp: integer; // TBigInt;
+  periodExp: integer; // TBigInt;
+  i: integer;
+begin
+  intPart := TRational.Create(0, 0, FBase);
+  for i := High(FIntPart) downto 0 do begin
+    intPart.Multiply(FBase);
+    intPart.Add(FIntPart[i]);
+  end;
+
+  uniqueFrac := TRational.Create(0, 0, FBase);
+  exp := 1;
+  for i := 0 to High(FFracPart) do begin
+    if (FPeriodPos >= 0) and (i >= FPeriodPos) then
+      Break;
+
+    exp := exp * FBase;
+    digitPart := TRational.Create(0, FFracPart[i], exp);
+    uniqueFrac.Add(digitPart);
+  end;
+
+  periodFrac := TRational.Create(0, 0, FBase);
+  periodExp := 1;
+  for i := FPeriodPos to High(FFracPart) do begin
+    exp := exp * FBase;
+    periodExp := periodExp * FBase;
+    digitPart := TRational.Create(0, FFracPart[i], periodExp);
+    uniqueFrac.Add(digitPart);
+  end;
+
+  periodSum := periodFrac / (exp - 1);
+
+  Result := intPart + uniqueFrac + periodSum;
+end;
+
+
 function TSNumber.GetAsString: string;
 var
   i: integer;
@@ -471,6 +526,23 @@ begin
 end;
 
 
+procedure TSNumber.SetAsRational(const AValue: TRational);
+var
+  fracNum: TSNumber;
+  i: integer;
+begin
+  SetAsInteger(AValue.IntPart);
+
+  fracNum := TSNumber.Create(FBase, 1);
+  fracNum.Divide(AValue.Denominator);
+  fracNum.Multiply(AValue.Numerator);
+
+  SetLength(FFracPart, Length(fracNum.FFracPart));
+  for i := 0 to High(fracNum.FFracPart) do
+    FFracPart[i] := fracNum.FFracPart[i];
+end;
+
+
 procedure TSNumber.SetAsString(const AValue: string);
 var
   pti: integer;
@@ -568,6 +640,12 @@ begin
   FIntPart := FIntPart + AValue.FIntPart + FNumerator div FDenominator;
   FNumerator := FNumerator mod FDenominator;
   Reduce;
+end;
+
+
+procedure TRational.Add(AValue: integer);
+begin
+  FIntPart := FIntPart + AValue;
 end;
 
 
@@ -703,6 +781,16 @@ begin
 
   ANum1 := ANum1 div divider;
   ANum2 := ANum2 div divider;
+end;
+
+
+{ TBigInt }
+
+class operator TBigInt.Implicit(const AValue: integer): TBigInt;
+begin
+  SetLength(Result.FData, 1);
+  Result.FData[0] := Abs(AValue);
+  Result.FSign := AValue < 0;
 end;
 
 
