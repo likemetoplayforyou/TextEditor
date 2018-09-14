@@ -242,31 +242,11 @@ end;
 
 procedure TSNumber.ConvertTo(ABase: integer);
 var
-  src: TSNumber;
-  i: integer;
-  exp: int64;
-  fracExp: TSNumber;
-  digitPart: TSNumber;
+  rational: TRational;
 begin
-  src.Assign(Self);
-
-  Clear;
+  rational := AsRational;
   FBase := ABase;
-  exp := 1;
-  for i := 0 to High(src.FIntPart) do begin
-    Add(src.FIntPart[i] * exp);
-    exp := exp * src.FBase;
-  end;
-
-  fracExp := TSNumber.Create(FBase, 1);
-  for i := 0 to Length(src.FFracPart) - 1 do begin
-    fracExp.Divide(src.FBase);
-
-    digitPart.Assign(fracExp);
-    digitPart.Multiply(src.FFracPart[i]);
-
-    Add(digitPart);
-  end;
+  AsRational := rational;
 end;
 
 
