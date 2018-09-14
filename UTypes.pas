@@ -10,18 +10,49 @@ type
   private
     FSign: boolean;
     FData: TCardinalDynArray;
+
+    function GetBit(AIndex: integer): byte;
+    procedure SetBit(AIndex: integer; AValue: byte);
+
+    function Multiply(AValue1, AValue2: integer): TBigInt; overload;
+    function InternalDiv(const ADividend, ADivider: TBigInt): TBigInt;
+    procedure ShlData(AShift: integer);
+    procedure TrimZeros;
   public
+    procedure Assign(const ASource: TBigInt);
+
+    function Equal(AValue: integer): boolean; overload;
+    procedure Add(const AValue: TBigInt); overload;
+    procedure Multiply(const AMultiplier: TBigInt); overload;
+    procedure Divide(ADivider: integer); overload;
+
     class operator Implicit(const AValue: integer): TBigInt; overload;
+    class operator Equal(
+      const AValue1: TBigInt; AValue2: integer): boolean; overload;
+    class operator NotEqual(
+      const AValue1: TBigInt; AValue2: integer): boolean; overload;
+    class operator Add(const AValue1, AValue2: TBigInt): TBigInt; overload;
+    class operator Multiply(const AValue1, AValue2: TBigInt): TBigInt; overload;
+    class operator IntDivide(
+      const ADividend, ADivider: TBigInt): TBigInt; overload;
+    class operator IntDivide(
+      const ADividend: TBigInt; const ADivider: integer): TBigInt; overload;
+    class operator Modulus(
+      const ADividend: TBigInt; const ADivider: integer): integer; overload;
+    class operator LeftShift(
+      const AValue: TBigInt; const ABits: integer): TBigInt;
+    class operator RightShift(
+      const AValue: TBigInt; const ABits: integer): TBigInt;
   end;
 
 
   TRational = record
   private
-    FIntPart: integer;
-    FNumerator: integer;
-    FDenominator: integer;
+    FIntPart: TBigInt;
+    FNumerator: TBigInt;
+    FDenominator: TBigInt;
 
-    procedure Reduce(var ANum1, ANum2: integer); overload;
+    procedure Reduce(var ANum1, ANum2: TBigInt); overload;
     procedure Reduce; overload;
   public
     constructor Create(
@@ -32,7 +63,7 @@ type
     procedure Add(const AValue: TRational); overload;
     procedure Add(AValue: integer); overload;
     procedure Subtract(const AValue: TRational); overload;
-    procedure Multiply(AMultiplier: integer); overload;
+    procedure Multiply(const AMultiplier: TBigInt); overload;
     procedure Divide(ADivider: integer); overload;
 
     class operator Implicit(const AValue: integer): TRational; overload;
@@ -43,15 +74,15 @@ type
     class operator Subtract(
       const AValue1, AValue2: TRational): TRational; overload;
     class operator Multiply(
-      const AValue1: TRational; const AValue2: integer): TRational;
+      const AValue1: TRational; const AValue2: TBigInt): TRational;
     class operator Divide(
       const ADividend: TRational; const ADivider: integer): TRational; overload;
     class operator IntDivide(
       const ADividend: TRational; const ADivider: integer): TRational;
 
-    property IntPart: integer read FIntPart;
-    property Numerator: integer read FNumerator;
-    property Denominator: integer read FDenominator;
+    property IntPart: TBigInt read FIntPart;
+    property Numerator: TBigInt read FNumerator;
+    property Denominator: TBigInt read FDenominator;
   end;
 
 
@@ -63,8 +94,8 @@ type
     FFracPart: TByteDynArray;
     FPeriodPos: integer;
 
-    function GetAsInteger: int64;
-    procedure SetAsInteger(AValue: int64);
+    function GetAsInteger: TBigInt;
+    procedure SetAsInteger(AValue: TBigInt);
     function GetAsString: string;
     procedure SetAsString(const AValue: string);
     function GetAsRational: TRational;
@@ -96,16 +127,20 @@ type
     procedure Multiply(const AValue: integer);
 
     procedure Divide(const AValue: TSNumber); overload;
-    procedure Divide(AValue: integer); overload;
+    procedure Divide(const AValue: TBigInt); overload;
 
     procedure ConvertTo(ABase: integer);
 
     class operator Negative(const AValue: TSNumber): TSNumber; overload;
 
-    property AsInteger: int64 read GetAsInteger write SetAsInteger;
+    property AsInteger: TBigInt read GetAsInteger write SetAsInteger;
     property AsString: string read GetAsString write SetAsString;
     property AsRational: TRational read GetAsRational write SetAsRational;
   end;
+
+
+const
+  MaxCardinal: cardinal = $FFFFFFFFFF;
 
 
 implementation
@@ -264,7 +299,7 @@ begin
 end;
 
 
-procedure TSNumber.Divide(AValue: integer);
+procedure TSNumber.Divide(const AValue: TBigInt);
 var
   rems: TByteDynArray;
 
@@ -283,7 +318,7 @@ var
 var
   i: integer;
   res: TSNumber;
-  rem: integer;
+  rem: TBigInt;
 begin
   res.Assign(Self);
 
@@ -325,7 +360,7 @@ begin
 end;
 
 
-function TSNumber.GetAsInteger: int64;
+function TSNumber.GetAsInteger: TBigInt;
 var
   i: integer;
   exp: int64;
@@ -494,8 +529,9 @@ begin
 end;
 
 
-procedure TSNumber.SetAsInteger(AValue: int64);
+procedure TSNumber.SetAsInteger(AValue: TBigInt);
 begin
+  // CHECK AValue passed to procedure correct (FData is copying)
   Clear;
 
   while AValue <> 0 do begin
@@ -689,14 +725,14 @@ end;
 
 
 class operator TRational.Multiply(
-  const AValue1: TRational; const AValue2: integer): TRational;
+  const AValue1: TRational; const AValue2: TBigInt): TRational;
 begin
   Result := AValue1;
   Result.Multiply(AValue2);
 end;
 
 
-procedure TRational.Multiply(AMultiplier: integer);
+procedure TRational.Multiply(const AMultiplier: TBigInt);
 begin
   FIntPart := FIntPart * AMultiplier;
   Reduce(AMultiplier, FDenominator);
@@ -721,26 +757,7 @@ begin
 end;
 
 
-procedure TRational.Reduce;
-begin
-  Reduce(FNumerator, FDenominator);
-end;
-
-
-procedure TRational.Subtract(const AValue: TRational);
-begin
-  Add(-AValue);
-end;
-
-
-class operator TRational.Subtract(const AValue1, AValue2: TRational): TRational;
-begin
-  Result := AValue1;
-  Result.Subtract(AValue2);
-end;
-
-
-procedure TRational.Reduce(var ANum1, ANum2: integer);
+procedure TRational.Reduce(var ANum1, ANum2: TBigInt);
 var
   divident: integer;
   divider: integer;
@@ -764,13 +781,328 @@ begin
 end;
 
 
+procedure TRational.Reduce;
+begin
+  Reduce(FNumerator, FDenominator);
+end;
+
+
+procedure TRational.Subtract(const AValue: TRational);
+begin
+  Add(-AValue);
+end;
+
+
+class operator TRational.Subtract(const AValue1, AValue2: TRational): TRational;
+begin
+  Result := AValue1;
+  Result.Subtract(AValue2);
+end;
+
+
 { TBigInt }
+
+procedure TBigInt.Add(const AValue: TBigInt);
+var
+  maxLen: integer;
+  overflow: byte;
+  nextOverflow: byte;
+  i: integer;
+begin
+  maxLen := Max(Length(FData), Length(AValue.FData));
+  SetLength(FData, maxLen);
+
+  overflow := 0;
+  for i := 0 to High(AValue.FData) do begin
+    if FData[i] > MaxCardinal - AValue.FData[i] - overflow then
+      nextOverflow := 1
+    else
+      nextOverflow := 0;
+    FData[i] := FData[i] + AValue.FData[i] + overflow;
+    overflow := nextOverflow;
+  end;
+
+  if overflow > 0 then begin
+    SetLength(FData, Length(FData) + 1);
+    FData[High(Fdata)] := 1;
+  end;
+end;
+
+
+function TBigInt.Equal(AValue: integer): boolean;
+begin
+  Result :=
+    (Length(FData) = 0) and (FData[0] = Abs(AValue)) and (FSign = (AValue < 0));
+end;
+
+
+class operator TBigInt.Add(const AValue1, AValue2: TBigInt): TBigInt;
+begin
+  Result.Assign(AValue1);
+  Result.Add(AValue2);
+end;
+
+
+procedure TBigInt.Assign(const ASource: TBigInt);
+var
+  i: integer;
+begin
+  SetLength(FData, Length(ASource.FData));
+  for i := 0 to High(ASource.FData) do
+    FData[i] := ASource.FData[i];
+end;
+
+
+procedure TBigInt.Divide(ADivider: integer);
+begin
+
+end;
+
+
+class operator TBigInt.Equal(const AValue1: TBigInt; AValue2: integer): boolean;
+begin
+  Result := AValue1.Equal(AValue2);
+end;
+
+
+function TBigInt.GetBit(AIndex: integer): byte;
+var
+  cellIdx: integer;
+  bitIdx: integer;
+  cellBit: integer;
+begin
+  Result := 0;
+  cellIdx := High(FData) - AIndex div (SizeOf(cardinal) * 8);
+  bitIdx := AIndex mod (SizeOf(cardinal) * 8);
+  cellBit := FData[cellIdx] and ($80000000 shr bitIdx);
+  if cellBit <> 0 then
+    Result := 1;
+end;
+
 
 class operator TBigInt.Implicit(const AValue: integer): TBigInt;
 begin
   SetLength(Result.FData, 1);
   Result.FData[0] := Abs(AValue);
   Result.FSign := AValue < 0;
+end;
+
+
+class operator TBigInt.IntDivide(const ADividend, ADivider: TBigInt): TBigInt;
+var
+  dvnIdx: integer;
+  dvrIdx: integer;
+  resIdx: integer;
+
+  rem: TBigInt;
+  i: integer;
+begin
+  dvnIdx := 0;
+  while true do begin
+    if ADividend.GetBit(dvnIdx) = 0 then begin
+      Inc(dvnIdx);
+      Continue;
+    end;
+
+    dvrIdx := 0;
+    while True do begin
+      if ADividend.GetBit(dvnIdx) > ADivider.GetBit(dvrIdx) then begin
+        Result.SetBit(resIdx, 1);
+      end;
+
+    end;
+
+  end;
+
+
+  SetLength(Result.FData, Length(ADividend.FData));
+  rem := 0;
+  for i := High(ADividend.FData) downto 0 do begin
+    rem := rem.ShlData(1);
+    Result.FData[i] := (ADividend.FData[i] + rem) div ADivider;
+    rem := (ADividend.FData[i] + rem) mod ADivider;
+  end;
+end;
+
+
+class operator TBigInt.IntDivide(
+  const ADividend: TBigInt; const ADivider: integer): TBigInt;
+var
+  rem: TBigInt;
+  i: integer;
+begin
+  SetLength(Result.FData, Length(ADividend.FData));
+  rem := 0;
+  for i := High(ADividend.FData) downto 0 do begin
+    rem := rem.ShlData(1);
+    Result.FData[i] := (ADividend.FData[i] + rem) div ADivider;
+    rem := (ADividend.FData[i] + rem) mod ADivider;
+  end;
+end;
+
+
+function TBigInt.InternalDiv(const ADividend, ADivider: TBigInt): TBigInt;
+begin
+
+end;
+
+
+class operator TBigInt.LeftShift(
+  const AValue: TBigInt; const ABits: integer): TBigInt;
+var
+  shiftLen: integer;
+  intShift: integer;
+  overShift: integer;
+  overflow: cardinal;
+  i: integer;
+begin
+  shiftLen := ABits div (SizeOf(cardinal) * 8);
+  intShift := ABits mod (SizeOf(cardinal) * 8);
+  overShift := (SizeOf(cardinal) * 8) - intShift;
+  SetLength(Result.FData, Length(AValue.FData) + shiftLen + 1);
+  overflow := 0;
+  for i := 0 to High(AValue.FData) do begin
+    Result.FData[i + shiftLen] := AValue.FData[i] shl intShift + overflow;
+    overflow := AValue.FData[i] shr overShift;
+  end;
+
+  if overflow > 0 then
+    Result.FData[Length(AValue.FData[i]) + shiftLen] := overflow;
+
+  Result.TrimZeros;
+end;
+
+
+procedure TBigInt.Multiply(const AMultiplier: TBigInt);
+var
+  i: integer;
+//  res:
+begin
+//  for i := 0 to High(AMultiplier.FData) do
+
+end;
+
+
+class operator TBigInt.Modulus(
+  const ADividend: TBigInt; const ADivider: integer): integer;
+begin
+  if Length(ADividend.FData) > 0 then
+    Result := ADividend.FData[0] mod ADivider
+  else
+    Result := 0;
+end;
+
+
+function TBigInt.Multiply(AValue1, AValue2: integer): TBigInt;
+var
+  exp: integer;
+  bit: byte;
+  bitProduct: integer;
+begin
+  exp := 0;
+  while AValue2 > 0 do begin
+    bit := AValue2 mod 2;
+    AValue2 := AValue2 shr 2;
+    bitProduct := AValue1 shl (bit * exp);
+    Result.Add(bitProduct);
+    Inc(exp);
+  end;
+end;
+
+
+class operator TBigInt.Multiply(const AValue1, AValue2: TBigInt): TBigInt;
+var
+  multiplier: TBigInt;
+  exp: integer;
+  bit: byte;
+  bitProduct: TBigInt;
+begin
+  multiplier.Assign(AValue2);
+
+  exp := 0;
+  while multiplier > 0 do begin
+    bit := multiplier mod 2;
+    multiplier := multiplier shr 2;
+    bitProduct := AValue1 shl (bit * exp);
+    Result.Add(bitProduct);
+    Inc(exp);
+  end;
+end;
+
+
+class operator TBigInt.NotEqual(
+  const AValue1: TBigInt; AValue2: integer): boolean;
+begin
+  Result := not Equal(AValue1, AValue2);
+end;
+
+
+class operator TBigInt.RightShift(
+  const AValue: TBigInt; const ABits: integer): TBigInt;
+var
+  shiftLen: integer;
+  intShift: integer;
+  overShift: integer;
+  overflow: cardinal;
+  i: integer;
+begin
+  shiftLen := ABits div (SizeOf(cardinal) * 8);
+  intShift := ABits mod (SizeOf(cardinal) * 8);
+  overShift := (SizeOf(cardinal) * 8) - intShift;
+  SetLength(Result.FData, Length(AValue.FData) - shiftLen);
+  overflow := 0;
+  for i := High(AValue.FData) downto 0 do begin
+    if i - shiftLen < 0 then
+      Break;
+
+    Result.FData[i - shiftLen] := AValue.FData[i] shr intShift + overflow;
+    overflow := AValue.FData[i] shl overShift;
+  end;
+
+  Result.TrimZeros;
+end;
+
+
+procedure TBigInt.SetBit(AIndex: integer; AValue: byte);
+var
+  cellIdx: integer;
+  bitIdx: integer;
+  cellBit: integer;
+begin
+  // May be wrong cell indexes
+  cellIdx := High(FData) - AIndex div (SizeOf(cardinal) * 8);
+  if cellIdx > High(FData) then
+    SetLength(FData, cellIdx);
+  bitIdx := AIndex mod (SizeOf(cardinal) * 8);
+  if AValue = 0 then begin
+    cellBit := $FFFFFFFF - ($80000000 shr bitIdx);
+    FData[cellIdx] := FData[cellIdx] and cellBit;
+  end
+  else begin
+    cellBit := $80000000 shr bitIdx;
+    FData[cellIdx] := FData[cellIdx] or cellBit;
+  end;
+end;
+
+
+procedure TBigInt.ShlData(AShift: integer);
+begin
+  Self := Self shl (SizeOf(cardinal) * 8 * AShift);
+end;
+
+
+procedure TBigInt.TrimZeros;
+var
+  lastNonZero: integer;
+  i: integer;
+begin
+  lastNonZero := 0;
+  for i := High(FData) downto 1 do
+    if FData[i] <> 0 then begin
+      lastNonZero := i;
+      Break;
+    end;
+  SetLength(FData, lastNonZero + 1);
 end;
 
 
